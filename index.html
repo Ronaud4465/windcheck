@@ -30,13 +30,21 @@ body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--txt);-webk
 .card{background:var(--bg2);border-radius:var(--r2);border:1px solid rgba(201,168,76,.15);overflow:hidden;}
 .ch{background:var(--v);padding:10px 14px;font-weight:700;font-size:.9rem;color:var(--txt);display:flex;align-items:center;gap:8px;}
 .cb{padding:14px;}
-.f{margin-bottom:10px;}
+.f{margin-bottom:10px;position:relative;}
 .f:last-child{margin-bottom:0;}
 .f label{display:block;font-size:.62rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt2);margin-bottom:4px;}
 .f input,.f textarea{width:100%;padding:10px 12px;background:var(--bg3);border:1.5px solid rgba(201,168,76,.2);border-radius:var(--r);color:var(--txt);font-family:'Barlow',sans-serif;font-size:.9rem;outline:none;-webkit-appearance:none;}
 .f input:focus{border-color:var(--or);}
 .f textarea{resize:none;min-height:70px;}
 .r2{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+
+/* DROPDOWN MEMOIRE */
+.mem-dropdown{position:absolute;top:100%;left:0;right:0;background:#1a2e1a;border:1.5px solid var(--or);border-radius:var(--r);z-index:50;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5);}
+.mem-item{padding:10px 12px;font-size:.88rem;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;}
+.mem-item:last-child{border-bottom:none;}
+.mem-item:hover,.mem-item:active{background:rgba(201,168,76,.15);}
+.mem-del{width:20px;height:20px;background:rgba(200,50,50,.7);border-radius:50%;border:none;color:#fff;font-size:.6rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+
 .btn{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;padding:14px;border-radius:var(--r);border:2px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;width:100%;color:#fff!important;transition:all .12s;}
 .btn:active{transform:scale(.97);}
 .bor{background:#b8920a;border-color:var(--or);}
@@ -144,14 +152,47 @@ body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--txt);-webk
 </div>
 <script>
 const DRIVE_FOLDER_ID='1PmtDyBLY3vjKA1fOvcTdz8_n4vkKMUVO';
+
+// ── MEMOIRE localStorage ──────────────────────────────────────
+function memGet(key){try{return JSON.parse(localStorage.getItem('wc_'+key)||'[]');}catch{return[];}}
+function memAdd(key,val){
+  if(!val||!val.trim())return;
+  let arr=memGet(key);
+  arr=arr.filter(x=>x.toLowerCase()!==val.toLowerCase());
+  arr.unshift(val.trim());
+  if(arr.length>10)arr=arr.slice(0,10);
+  try{localStorage.setItem('wc_'+key,JSON.stringify(arr));}catch{}
+}
+function memDel(key,val){
+  let arr=memGet(key).filter(x=>x!==val);
+  try{localStorage.setItem('wc_'+key,JSON.stringify(arr));}catch{}
+  render();
+}
+
 let S={screen:'start',session:null,turbines:[],sheet:null,toast:null,
-  sf:{client:'',site:'',date:today(),tech:''},ss:null,up:null};
+  sf:{client:'',site:'',date:today(),tech:memGet('tech')[0]||''},
+  ss:null,up:null,
+  dropdown:null // {field, items}
+};
+
 function today(){return new Date().toISOString().split('T')[0];}
 function genRef(){const d=new Date();return `WC-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(Math.floor(Math.random()*900)+100)}`;}
 function readFile(f){return new Promise(r=>{const fr=new FileReader();fr.onload=e=>r(e.target.result);fr.readAsDataURL(f);});}
 function showToast(m){S.toast=m;render();setTimeout(()=>{S.toast=null;render();},2800);}
 function getGPS(){return new Promise(r=>{if(!navigator.geolocation){r(null);return;}navigator.geolocation.getCurrentPosition(p=>r({lat:p.coords.latitude.toFixed(5),lng:p.coords.longitude.toFixed(5),acc:Math.round(p.coords.accuracy)}),()=>r(null),{timeout:8000,maximumAge:30000});});}
-async function ocrPlaque(b64data){try{const b64=b64data.split(',')[1];const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:60,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},{type:'text',text:'Lis le numero identifiant sur cette plaque eolienne (ex: EOL-007). Reponds UNIQUEMENT avec ce code. Si illisible: INCONNU.'}]}]})});const d=await res.json();return(d.content?.[0]?.text||'').trim().toUpperCase().replace(/[^A-Z0-9\-_]/g,'').slice(0,12)||null;}catch(e){return null;}}
+
+async function ocrPlaque(b64data){
+  try{
+    const b64=b64data.split(',')[1];
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:60,messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
+        {type:'text',text:'Lis le numero identifiant sur cette plaque eolienne (ex: EOL-007). Reponds UNIQUEMENT avec ce code. Si illisible: INCONNU.'}
+      ]}]})});
+    const d=await res.json();
+    return(d.content?.[0]?.text||'').trim().toUpperCase().replace(/[^A-Z0-9\-_]/g,'').slice(0,12)||null;
+  }catch(e){return null;}
+}
 
 function genRapportHTML(session,turbines){
   const done=turbines.filter(t=>t.av&&t.ap).length;
@@ -175,8 +216,13 @@ async function uploadToDrive(session,turbines){
   S.up.items=items.map(i=>({...i,status:'wait'}));render();
   for(let i=0;i<items.length;i++){
     S.up.items[i].status='uploading';S.up.progress=Math.round((i/items.length)*100);render();
-    try{await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,mcp_servers:[{type:'url',url:'https://drivemcp.googleapis.com/mcp/v1',name:'gdrive'}],messages:[{role:'user',content:`Uploade ce fichier sur Google Drive dans le dossier ID "${DRIVE_FOLDER_ID}" avec le titre "${items[i].name}". ${items[i].data?'Contenu base64: '+items[i].data:'Contenu texte: '+items[i].text?.slice(0,500)+'...'}`}]})});S.up.items[i].status='done';}
-    catch(e){S.up.items[i].status='error';}
+    try{
+      await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,
+          mcp_servers:[{type:'url',url:'https://drivemcp.googleapis.com/mcp/v1',name:'gdrive'}],
+          messages:[{role:'user',content:`Uploade ce fichier sur Google Drive dans le dossier ID "${DRIVE_FOLDER_ID}" avec le titre "${items[i].name}". ${items[i].data?'Contenu base64: '+items[i].data:'Contenu texte: '+items[i].text?.slice(0,500)+'...'}`}]})});
+      S.up.items[i].status='done';
+    }catch(e){S.up.items[i].status='error';}
     S.up.progress=Math.round(((i+1)/items.length)*100);render();
     await new Promise(r=>setTimeout(r,400));
   }
@@ -202,6 +248,23 @@ function render(){
   bind();
 }
 
+// Champ avec mémoire
+function memField(id,label,placeholder,value,memKey){
+  const items=memGet(memKey);
+  return `<div class="f" style="position:relative">
+    <label>${label}</label>
+    <input type="text" id="${id}" placeholder="${placeholder}" value="${value}" autocomplete="off"
+      style="padding-right:${items.length?'36px':'12px'}">
+    ${items.length?`<button id="btn-mem-${id}" style="position:absolute;right:8px;bottom:10px;background:none;border:none;color:var(--or);font-size:1rem;cursor:pointer;padding:2px 4px;" title="Historique">▾</button>`:''}
+    ${S.dropdown?.field===id?`<div class="mem-dropdown">
+      ${items.map(v=>`<div class="mem-item" data-memfield="${id}" data-memval="${v}">
+        <span>${v}</span>
+        <button class="mem-del" data-memkey="${memKey}" data-memdelval="${v}">✕</button>
+      </div>`).join('')}
+    </div>`:''}
+  </div>`;
+}
+
 function renderStart(){
   const f=S.sf;
   return `
@@ -213,23 +276,11 @@ function renderStart(){
     <div class="card">
       <div class="ch">📋 Session du jour</div>
       <div class="cb">
-        <div class="f">
-          <label>Client</label>
-          <input type="text" id="s-client" placeholder="Nom du client..." value="${f.client}" autocomplete="off">
-        </div>
-        <div class="f">
-          <label>Site / Parc eolien</label>
-          <input type="text" id="s-site" placeholder="Nom du parc..." value="${f.site}" autocomplete="off">
-        </div>
+        ${memField('s-client','Client','Nom du client...',f.client,'client')}
+        ${memField('s-site','Site / Parc eolien','Nom du parc...',f.site,'site')}
         <div class="r2">
-          <div class="f">
-            <label>Date</label>
-            <input type="date" id="s-date" value="${f.date}">
-          </div>
-          <div class="f">
-            <label>Technicien</label>
-            <input type="text" id="s-tech" placeholder="Votre nom..." value="${f.tech}" autocomplete="off">
-          </div>
+          <div class="f"><label>Date</label><input type="date" id="s-date" value="${f.date}"></div>
+          ${memField('s-tech','Technicien','Votre nom...',f.tech,'tech')}
         </div>
       </div>
     </div>
@@ -251,19 +302,12 @@ function renderSession(){
     <div class="card">
       <div class="ch">📍 Eoliennes du jour (${t.length})</div>
       <div class="cb"><div class="tl">
-        ${t.map((x,i)=>{
-          const ok=x.av&&x.ap;
-          const bg=x.num.replace(/\D/g,'').slice(0,3)||x.num.slice(0,4).toUpperCase();
-          return `<div class="tr" data-edit="${i}">
-            <div class="tb ${ok&&!x.prob?'ok':''} ${x.prob?'warn':''}">${bg}</div>
+        ${t.map((x,i)=>{const ok=x.av&&x.ap;const bg=x.num.replace(/\D/g,'').slice(0,3)||x.num.slice(0,4).toUpperCase();
+          return `<div class="tr" data-edit="${i}"><div class="tb ${ok&&!x.prob?'ok':''} ${x.prob?'warn':''}">${bg}</div>
             <div class="ti"><div class="tn">Eol. ${x.num}</div>
-              <div class="tm">${x.gps?'📍 '+x.gps.lat+','+x.gps.lng:'📍 GPS...'}${x.prob?' · ⚠':''}</div></div>
-            <div class="tt">
-              ${x.av?`<img class="th" src="${x.av}">`:'<div class="the">AV</div>'}
-              ${x.ap?`<img class="th" src="${x.ap}">`:'<div class="the">AP</div>'}
-            </div>
-          </div>`;
-        }).join('')}
+            <div class="tm">${x.gps?'📍 '+x.gps.lat+','+x.gps.lng:'📍 GPS...'}${x.prob?' · ⚠':''}</div></div>
+            <div class="tt">${x.av?`<img class="th" src="${x.av}">`:'<div class="the">AV</div>'}${x.ap?`<img class="th" src="${x.ap}">`:'<div class="the">AP</div>'}</div>
+          </div>`;}).join('')}
       </div></div>
     </div>
     <button class="btn bdrive" id="btn-rapport">☁ ENVOYER SUR GOOGLE DRIVE</button>`:''}
@@ -273,14 +317,9 @@ function renderSession(){
 function renderSheet(editIdx){
   const ex=editIdx!=null?S.turbines[editIdx]:null;
   const ss=S.ss||{};
-  const num=ss.num??ex?.num??'';
-  const prob=ss.prob??ex?.prob??false;
-  const pd=ss.pd??ex?.pd??'';
-  const av=ss.av??ex?.av??null;
-  const ap=ss.ap??ex?.ap??null;
-  const pp=ss.pp??ex?.pp??[];
-  const gps=ss.gps??ex?.gps??null;
-  const ocr=ss.ocr??false;
+  const num=ss.num??ex?.num??'';const prob=ss.prob??ex?.prob??false;const pd=ss.pd??ex?.pd??'';
+  const av=ss.av??ex?.av??null;const ap=ss.ap??ex?.ap??null;const pp=ss.pp??ex?.pp??[];
+  const gps=ss.gps??ex?.gps??null;const ocr=ss.ocr??false;
   const pslot=(lbl,photo,key)=>`<div class="pslot${photo?' filled':''}">
     ${photo?`<img src="${photo}"><button class="pdel" data-clear="${key}">✕</button>`:`<div class="pico">📷</div><div class="plbl">${lbl}</div>`}
     <div class="pover">${lbl}</div>
@@ -290,36 +329,26 @@ function renderSheet(editIdx){
     <div class="sheet">
       <div class="handle"></div>
       <div class="sh3">⚙ Saisie Eolienne</div>
-      <div class="gps-row">
-        <div class="gdot${gps?' ok':''}"></div>
-        <span>${gps?'📍 '+gps.lat+', '+gps.lng+' (±'+gps.acc+'m)':'Localisation GPS en cours...'}</span>
-      </div>
-      <div class="f">
-        <label>Numero eolienne</label>
+      <div class="gps-row"><div class="gdot${gps?' ok':''}"></div>
+        <span>${gps?'📍 '+gps.lat+', '+gps.lng+' (±'+gps.acc+'m)':'Localisation GPS en cours...'}</span></div>
+      <div class="f"><label>Numero eolienne</label>
         <div class="num-row">
           <input class="big-input" id="turb-num" type="text" placeholder="EOL-007" value="${num}">
           <label class="scan-btn" for="scan-inp">🔍<div class="scan-lbl">SCAN</div></label>
           <input type="file" id="scan-inp" accept="image/*" capture="environment" style="position:absolute;opacity:0;width:1px;height:1px;">
-        </div>
-        ${ocr?`<div class="ocr-box"><div class="spin"></div> Lecture...</div>`:''}
-      </div>
+        </div>${ocr?`<div class="ocr-box"><div class="spin"></div> Lecture...</div>`:''}</div>
       <div class="div"></div>
       <span class="lsm">Photos avant / apres</span>
       <div class="pgrid">${pslot('AVANT',av,'av')}${pslot('APRES',ap,'ap')}</div>
       <div class="div"></div>
       <button class="btn bsm ${prob?'bwarn':'bghost'}" id="btn-prob" style="margin-bottom:${prob?'10px':'0'}">
-        ⚠ ${prob?'Probleme signale - toucher pour retirer':'Signaler un probleme'}
-      </button>
+        ⚠ ${prob?'Probleme signale - toucher pour retirer':'Signaler un probleme'}</button>
       ${prob?`
       <div class="f" style="margin-top:8px"><label>Description</label>
         <textarea id="prob-desc" rows="2" style="width:100%;padding:9px 11px;background:var(--bg3);border:1.5px solid rgba(201,168,76,.2);border-radius:var(--r);color:var(--txt);font-family:'Barlow',sans-serif;font-size:.85rem;outline:none;resize:none">${pd}</textarea></div>
       <span class="lsm">Photos probleme (${pp.length}/3)</span>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px">
-        ${pp.map((p,i)=>typeof p==='string'?`
-          <div style="position:relative;border-radius:var(--r);overflow:hidden;aspect-ratio:1;background:var(--bg3)">
-            <img src="${p}" style="width:100%;height:100%;object-fit:cover">
-            <button class="pdel" data-dpp="${i}">✕</button>
-          </div>`:'').join('')}
+        ${pp.map((p,i)=>typeof p==='string'?`<div style="position:relative;border-radius:var(--r);overflow:hidden;aspect-ratio:1;background:var(--bg3)"><img src="${p}" style="width:100%;height:100%;object-fit:cover"><button class="pdel" data-dpp="${i}">✕</button></div>`:'').join('')}
         ${pp.length<3?`<div class="pslot" style="aspect-ratio:1"><div class="pico" style="font-size:1.3rem">📷</div><div class="plbl">Ajouter</div><input type="file" accept="image/*" capture="environment" data-photo="pp"></div>`:''}
       </div>`:''}
       <div class="div"></div>
@@ -332,37 +361,12 @@ function renderSheet(editIdx){
 }
 
 function renderRapport(){
-  const us=S.up;
-  let ds='';
-  if(!us){
-    ds=`<div style="margin-bottom:12px">
-      <button class="btn bdrive" id="btn-upload">☁ Sauvegarder sur Google Drive</button>
-      <div style="font-size:.65rem;color:var(--txt2);text-align:center;margin-top:5px;opacity:.6">Rapport + photos → Drive · Lien client · 7 jours</div>
-    </div>`;
-  } else if(us.phase==='uploading'){
-    ds=`<div class="drive-box">
-      <div class="drive-title"><div class="spin" style="border-top-color:var(--ok);border-color:rgba(46,168,74,.3)"></div> Upload...</div>
-      <div class="prog"><div class="progf" style="width:${us.progress}%"></div></div>
-      <div style="text-align:right;font-size:.62rem;color:var(--txt2);margin-top:3px">${us.progress}%</div>
-      ${us.items.map(item=>`<div class="urow">
-        <span>${item.type.includes('image')?'📷':'📄'}</span>
-        <span class="uname">${item.label}</span>
-        <span class="ust ${item.status==='wait'?'uw':item.status==='uploading'?'uu':item.status==='done'?'ud':'ue'}">
-          ${item.status==='wait'?'Attente':item.status==='uploading'?'<div class="spin" style="width:9px;height:9px"></div>':item.status==='done'?'✓':'✗'}
-        </span>
-      </div>`).join('')}
-    </div>`;
-  } else if(us.phase==='done'){
-    ds=`<div class="share-box">
-      <div class="share-title">✅ Sauvegarde sur Google Drive</div>
-      <div class="share-link">${us.shareLink}</div>
-      <button class="btn bblue bsm" id="btn-copy">📋 Copier le lien</button>
-      <div class="expnote">⏱ A supprimer le ${us.expiryDate}</div>
-    </div>`;
-  }
+  const us=S.up;let ds='';
+  if(!us){ds=`<div style="margin-bottom:12px"><button class="btn bdrive" id="btn-upload">☁ Sauvegarder sur Google Drive</button><div style="font-size:.65rem;color:var(--txt2);text-align:center;margin-top:5px;opacity:.6">Rapport + photos → Drive · Lien client · 7 jours</div></div>`;}
+  else if(us.phase==='uploading'){ds=`<div class="drive-box"><div class="drive-title"><div class="spin" style="border-top-color:var(--ok);border-color:rgba(46,168,74,.3)"></div> Upload...</div><div class="prog"><div class="progf" style="width:${us.progress}%"></div></div><div style="text-align:right;font-size:.62rem;color:var(--txt2);margin-top:3px">${us.progress}%</div>${us.items.map(item=>`<div class="urow"><span>${item.type.includes('image')?'📷':'📄'}</span><span class="uname">${item.label}</span><span class="ust ${item.status==='wait'?'uw':item.status==='uploading'?'uu':item.status==='done'?'ud':'ue'}">${item.status==='wait'?'Attente':item.status==='uploading'?'<div class="spin" style="width:9px;height:9px"></div>':item.status==='done'?'✓':'✗'}</span></div>`).join('')}</div>`;}
+  else if(us.phase==='done'){ds=`<div class="share-box"><div class="share-title">✅ Sauvegarde sur Google Drive</div><div class="share-link">${us.shareLink}</div><button class="btn bblue bsm" id="btn-copy">📋 Copier le lien</button><div class="expnote">⏱ A supprimer le ${us.expiryDate}</div></div>`;}
   const t=S.turbines,s=S.session;
-  const done=t.filter(x=>x.av&&x.ap).length;
-  const probs=t.filter(x=>x.prob).length;
+  const done=t.filter(x=>x.av&&x.ap).length;const probs=t.filter(x=>x.prob).length;
   return `<div class="overlay" id="overlay">
     <div class="sheet" style="height:92%">
       <div class="handle"></div>
@@ -370,28 +374,10 @@ function renderRapport(){
       ${ds}
       <div style="background:var(--v);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;">
         <div style="font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:800;color:var(--or);margin-bottom:8px">WindCheck - ${s.ref}</div>
-        ${[['Client',s.client],['Site',s.site],['Date',s.date],['Technicien',s.tech],['Eoliennes',t.length],['Completes',done+'/'+t.length],['Problemes',probs>0?probs+' ⚠':'Aucun']].map(([k,v])=>`
-          <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.8rem;">
-            <span style="color:var(--txt2)">${k}</span><span style="font-weight:600">${v}</span>
-          </div>`).join('')}
+        ${[['Client',s.client],['Site',s.site],['Date',s.date],['Technicien',s.tech],['Eoliennes',t.length],['Completes',done+'/'+t.length],['Problemes',probs>0?probs+' ⚠':'Aucun']].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.8rem;"><span style="color:var(--txt2)">${k}</span><span style="font-weight:600">${v}</span></div>`).join('')}
       </div>
-      ${t.map(x=>`<div class="rcard">
-        <div class="rhead">
-          <span class="rnum">Eol. ${x.num}</span>
-          <span class="pill ${x.av&&x.ap?'pok':'ptodo'}">${x.av&&x.ap?'✓':'⏳'}</span>
-          ${x.prob?'<span class="pill pwarn">⚠</span>':''}
-        </div>
-        ${x.gps?`<div style="font-size:.65rem;color:var(--txt2);margin-bottom:5px">📍 ${x.gps.lat}, ${x.gps.lng}</div>`:''}
-        ${(x.av||x.ap)?`<div class="rphotos">
-          <div class="rphoto">${x.av?`<img src="${x.av}">`:''}><div class="rtag">Avant</div></div>
-          <div class="rphoto">${x.ap?`<img src="${x.ap}">`:''}><div class="rtag">Apres</div></div>
-        </div>`:''}
-        ${x.prob?`<div class="rprob"><div class="rprobh">⚠ ${x.pd||'Probleme'}</div>
-          ${x.pp?.length?`<div class="rprobphotos">${x.pp.map(p=>typeof p==='string'?`<div class="rprobphoto"><img src="${p}"></div>`:'').join('')}</div>`:''}</div>`:''}
-      </div>`).join('')}
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn bghost bsm" style="flex:1" id="btn-cancel">← Retour</button>
-      </div>
+      ${t.map(x=>`<div class="rcard"><div class="rhead"><span class="rnum">Eol. ${x.num}</span><span class="pill ${x.av&&x.ap?'pok':'ptodo'}">${x.av&&x.ap?'✓':'⏳'}</span>${x.prob?'<span class="pill pwarn">⚠</span>':''}</div>${x.gps?`<div style="font-size:.65rem;color:var(--txt2);margin-bottom:5px">📍 ${x.gps.lat}, ${x.gps.lng}</div>`:''}${(x.av||x.ap)?`<div class="rphotos"><div class="rphoto">${x.av?`<img src="${x.av}">`:''}><div class="rtag">Avant</div></div><div class="rphoto">${x.ap?`<img src="${x.ap}">`:''}><div class="rtag">Apres</div></div></div>`:''}${x.prob?`<div class="rprob"><div class="rprobh">⚠ ${x.pd||'Probleme'}</div>${x.pp?.length?`<div class="rprobphotos">${x.pp.map(p=>typeof p==='string'?`<div class="rprobphoto"><img src="${p}"></div>`:'').join('')}</div>`:''}</div>`:''}</div>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn bghost bsm" style="flex:1" id="btn-cancel">← Retour</button></div>
     </div>
   </div>`;
 }
@@ -399,87 +385,82 @@ function renderRapport(){
 function initSS(editIdx){
   const ex=editIdx!=null?S.turbines[editIdx]:null;
   S.ss={num:ex?.num||'',prob:ex?.prob||false,pd:ex?.pd||'',av:ex?.av||null,ap:ex?.ap||null,pp:ex?.pp||[],gps:ex?.gps||null,ocr:false};
-  if(!ex?.gps)getGPS().then(g=>{
-    if(S.ss&&g){S.ss.gps=g;
-      const d=document.querySelector('.gdot'),t=document.querySelector('.gps-row span');
-      if(d)d.className='gdot ok';
-      if(t)t.textContent='📍 '+g.lat+', '+g.lng+' (±'+g.acc+'m)';
-    }
-  });
+  if(!ex?.gps)getGPS().then(g=>{if(S.ss&&g){S.ss.gps=g;const d=document.querySelector('.gdot'),t=document.querySelector('.gps-row span');if(d)d.className='gdot ok';if(t)t.textContent='📍 '+g.lat+', '+g.lng+' (±'+g.acc+'m)';}});
 }
 
 function bind(){
   const el=id=>document.getElementById(id);
   const on=(id,fn)=>{const e=el(id);if(e)e.onclick=fn;};
+
   on('btn-start',()=>{
     const client=el('s-client')?.value?.trim()||'';
     const site=el('s-site')?.value?.trim()||'';
     const tech=el('s-tech')?.value?.trim()||'';
     const date=el('s-date')?.value||'';
     if(!client||!site||!tech){showToast('⚠ Remplis tous les champs');return;}
+    // Sauvegarder dans la mémoire
+    memAdd('client',client);memAdd('site',site);memAdd('tech',tech);
     S.sf={client,site,date,tech};
-    S.session={...S.sf,ref:genRef()};S.screen='session';S.ss=null;render();
+    S.session={...S.sf,ref:genRef()};S.screen='session';S.ss=null;S.dropdown=null;render();
   });
+
+  // Boutons mémoire ▾
+  ['s-client','s-site','s-tech'].forEach(id=>{
+    const btn=document.getElementById('btn-mem-'+id);
+    if(btn)btn.onclick=e=>{e.stopPropagation();S.dropdown=S.dropdown?.field===id?null:{field:id};render();};
+  });
+
+  // Clic sur item mémoire
+  document.querySelectorAll('[data-memfield]').forEach(item=>{
+    item.onclick=e=>{
+      if(e.target.closest('.mem-del'))return;
+      const fieldId=item.dataset.memfield;
+      const val=item.dataset.memval;
+      const input=document.getElementById(fieldId);
+      if(input)input.value=val;
+      if(fieldId==='s-client')S.sf.client=val;
+      if(fieldId==='s-site')S.sf.site=val;
+      if(fieldId==='s-tech')S.sf.tech=val;
+      S.dropdown=null;render();
+    };
+  });
+
+  // Supprimer item mémoire
+  document.querySelectorAll('.mem-del').forEach(btn=>{
+    btn.onclick=e=>{e.stopPropagation();memDel(btn.dataset.memkey,btn.dataset.memdelval);};
+  });
+
+  // Fermer dropdown en cliquant ailleurs
+  document.addEventListener('click',e=>{
+    if(S.dropdown&&!e.target.closest('.f')){S.dropdown=null;render();}
+  },{once:true});
+
   on('btn-new',()=>{S.sheet='new';initSS(null);render();});
   on('btn-rapport',()=>{S.sheet='rapport';S.up=null;render();});
   on('btn-back',()=>{S.screen='start';S.session=null;S.turbines=[];S.sheet=null;S.up=null;render();});
-  document.querySelectorAll('[data-edit]').forEach(e=>{
-    if(e.tagName==='DIV')e.onclick=()=>{const i=parseInt(e.dataset.edit);S.sheet='edit:'+i;initSS(i);render();};
-  });
+  document.querySelectorAll('[data-edit]').forEach(e=>{if(e.tagName==='DIV')e.onclick=()=>{const i=parseInt(e.dataset.edit);S.sheet='edit:'+i;initSS(i);render();};});
   on('btn-cancel',()=>{S.sheet=null;S.ss=null;render();});
   const ov=el('overlay');if(ov)ov.onclick=e=>{if(e.target===ov){S.sheet=null;S.ss=null;render();}};
   const ni=el('turb-num');if(ni)ni.oninput=e=>{if(S.ss)S.ss.num=e.target.value;};
   on('btn-prob',()=>{if(S.ss)S.ss.prob=!S.ss.prob;render();});
   const pd=el('prob-desc');if(pd)pd.oninput=e=>{if(S.ss)S.ss.pd=e.target.value;};
   const si=el('scan-inp');
-  if(si)si.onchange=async e=>{
-    const f=e.target.files[0];if(!f)return;
-    const data=await readFile(f);
-    if(S.ss)S.ss.ocr=true;render();
-    const res=await ocrPlaque(data);
-    if(S.ss)S.ss.ocr=false;
-    if(res&&res!=='INCONNU'){if(S.ss)S.ss.num=res;showToast('🔍 Lu : '+res);}
-    else showToast('⚠ Illisible - saisir manuellement');
-    render();
-  };
-  document.querySelectorAll('[data-photo]').forEach(inp=>{
-    inp.onchange=async e=>{
-      const f=e.target.files[0];if(!f)return;
-      const data=await readFile(f);if(!S.ss)return;
-      const k=inp.dataset.photo;
-      if(k==='av')S.ss.av=data;
-      else if(k==='ap')S.ss.ap=data;
-      else if(k==='pp'&&S.ss.pp.length<3)S.ss.pp=[...S.ss.pp,data];
-      render();
-    };
-  });
-  document.querySelectorAll('[data-clear]').forEach(b=>{
-    b.onclick=e=>{e.stopPropagation();if(!S.ss)return;
-      const k=b.dataset.clear;if(k==='av')S.ss.av=null;else if(k==='ap')S.ss.ap=null;render();};
-  });
-  document.querySelectorAll('[data-dpp]').forEach(b=>{
-    b.onclick=e=>{e.stopPropagation();const i=parseInt(b.dataset.dpp);
-      if(S.ss)S.ss.pp=S.ss.pp.filter((_,j)=>j!==i);render();};
-  });
+  if(si)si.onchange=async e=>{const f=e.target.files[0];if(!f)return;const data=await readFile(f);if(S.ss)S.ss.ocr=true;render();const res=await ocrPlaque(data);if(S.ss)S.ss.ocr=false;if(res&&res!=='INCONNU'){if(S.ss)S.ss.num=res;showToast('🔍 Lu : '+res);}else showToast('⚠ Illisible - saisir manuellement');render();};
+  document.querySelectorAll('[data-photo]').forEach(inp=>{inp.onchange=async e=>{const f=e.target.files[0];if(!f)return;const data=await readFile(f);if(!S.ss)return;const k=inp.dataset.photo;if(k==='av')S.ss.av=data;else if(k==='ap')S.ss.ap=data;else if(k==='pp'&&S.ss.pp.length<3)S.ss.pp=[...S.ss.pp,data];render();};});
+  document.querySelectorAll('[data-clear]').forEach(b=>{b.onclick=e=>{e.stopPropagation();if(!S.ss)return;const k=b.dataset.clear;if(k==='av')S.ss.av=null;else if(k==='ap')S.ss.ap=null;render();};});
+  document.querySelectorAll('[data-dpp]').forEach(b=>{b.onclick=e=>{e.stopPropagation();const i=parseInt(b.dataset.dpp);if(S.ss)S.ss.pp=S.ss.pp.filter((_,j)=>j!==i);render();};});
   on('btn-save',()=>{
-    const num=(el('turb-num')?.value||S.ss?.num||'').trim().toUpperCase();
-    if(!num)return;
-    const ss=S.ss||{};
-    const turb={num,av:ss.av||null,ap:ss.ap||null,prob:ss.prob||false,pd:ss.pd||'',pp:ss.pp||[],gps:ss.gps||null};
+    const num=(el('turb-num')?.value||S.ss?.num||'').trim().toUpperCase();if(!num)return;
+    const ss=S.ss||{};const turb={num,av:ss.av||null,ap:ss.ap||null,prob:ss.prob||false,pd:ss.pd||'',pp:ss.pp||[],gps:ss.gps||null};
     const ei=el('btn-save')?.dataset.ei;
     if(ei!==''){const i=parseInt(ei);S.turbines=S.turbines.map((x,j)=>j===i?turb:x);showToast('✅ Mis a jour');}
     else{S.turbines=[...S.turbines,turb];showToast('✅ Eol. '+num+' enregistree');}
     S.sheet=null;S.ss=null;render();
   });
   on('btn-upload',()=>uploadToDrive(S.session,S.turbines));
-  on('btn-copy',()=>{
-    if(S.up?.shareLink){
-      navigator.clipboard?.writeText(S.up.shareLink)
-        .then(()=>showToast('📋 Lien copie!'))
-        .catch(()=>showToast('Lien: '+S.up.shareLink));
-    }
-  });
+  on('btn-copy',()=>{if(S.up?.shareLink){navigator.clipboard?.writeText(S.up.shareLink).then(()=>showToast('📋 Lien copie!')).catch(()=>showToast('Lien: '+S.up.shareLink));}});
 }
+
 setTimeout(()=>{document.getElementById('splash').style.display='none';render();},1800);
 </script>
 </body>
